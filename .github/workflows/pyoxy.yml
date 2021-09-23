@@ -1,0 +1,69 @@
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '13 15 * * *'
+jobs:
+  macos-exe:
+    strategy:
+      fail-fast: false
+      matrix:
+        target_triple:
+          - 'aarch64-apple-darwin'
+          - 'x86_64-apple-darwin'
+    runs-on: 'macos-11'
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      SCCACHE_BUCKET: 'pyoxidizer-sccache'
+      SCCACHE_S3_USE_SSL: '1'
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          profile: minimal
+          target: ${{ matrix.target_triple }}
+
+      - name: Install sccache
+        run: |
+          wget -O sccache.tar.gz --progress dot:mega https://github.com/mozilla/sccache/releases/download/v0.2.15/sccache-v0.2.15-x86_64-apple-darwin.tar.gz
+          tar -xvzf sccache.tar.gz
+          mv sccache-*/sccache /Users/runner/.cargo/bin/sccache
+          chmod +x /Users/runner/.cargo/bin/sccache
+          sccache --start-server
+
+      - name: Build pyoxy Executable
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          case "${{ matrix.target_triple }}" in
+            aarch64-apple-darwin)
+              export SDKROOT=/Applications/Xcode_12.5.1.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.3.sdk
+              export OSX_DEPLOYMENT_TARGET=11.0
+              ;;
+            x86_64-apple-darwin)
+              export OSX_DEPLOYMENT_TARGET=10.9
+              ;;
+            *)
+              echo "unhandled target triple: ${{ matrix.target_triple }}"
+              exit 1
+              ;;
+          esac
+
+          rustc --version
+          cargo run --bin pyoxidizer -- build --release --target-triple ${{ matrix.target_triple }} --path pyoxy
+
+          PYO3_CONFIG_FILE=$(pwd)/pyoxy/build/${{ matrix.target_triple }}/release/resources/pyo3-build-config-file.txt cargo build --bin pyoxy --target ${{ matrix.target_triple }} --release
+
+          mkdir -p dist/${{ matrix.target_triple }}
+          mv target/${{ matrix.target_triple }}/release/pyoxy dist/${{ matrix.target_triple }}/
+
+      - name: Upload Executable
+        uses: actions/upload-artifact@v2
+        with:
+          name: macos_exes
+          path: |
+            dist/*/*
