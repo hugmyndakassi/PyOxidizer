@@ -100,6 +100,12 @@ fn create_macho_with_signature(
         .len()
         + signature_data.len();
 
+    // `codesign` rounds up the segment's vmsize to the nearest 16kb boundary.
+    // We emulate that behavior.
+    let new_linkedit_segment_vmsize =
+        ((new_linkedit_segment_size as isize + 0x3FFF) & (-0x4000)) as usize;
+    assert!(new_linkedit_segment_vmsize >= new_linkedit_segment_size);
+
     let mut cursor = std::io::Cursor::new(Vec::<u8>::new());
 
     // Mach-O data structures are variable endian. So use the endian defined
@@ -143,6 +149,7 @@ fn create_macho_with_signature(
                     Ok(SEG_LINKEDIT) => {
                         let mut segment = *segment;
                         segment.filesize = new_linkedit_segment_size as _;
+                        segment.vmsize = new_linkedit_segment_vmsize as _;
 
                         segment
                     }
@@ -158,6 +165,7 @@ fn create_macho_with_signature(
                     Ok(SEG_LINKEDIT) => {
                         let mut segment = *segment;
                         segment.filesize = new_linkedit_segment_size as _;
+                        segment.vmsize = new_linkedit_segment_vmsize as _;
 
                         segment
                     }
